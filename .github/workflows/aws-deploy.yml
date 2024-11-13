@@ -1,44 +1,52 @@
-# This workflow uses actions that are not certified by GitHub.
-# They are provided by a third-party and are governed by
-# separate terms of service, privacy policy, and support
-# documentation.
-# This workflow will build a package using Gradle and then publish it to GitHub packages when a release is created
-# For more information see: https://github.com/actions/setup-java/blob/main/docs/advanced-usage.md#Publishing-using-gradle
-
-name: Gradle Package
-
-on:
-  release:
-    types: [created]
-
+name: programmers-be
+on :
+  push:
+    branches:
+      - main
 jobs:
   build:
-
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
     steps:
-    - uses: actions/checkout@v4
-    - name: Set up JDK 17
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'
-        server-id: github # Value of the distributionManagement/repository/id field of the pom.xml
-        settings-path: ${{ github.workspace }} # location for the settings.xml file
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Setup Gradle
-      uses: gradle/actions/setup-gradle@af1da67850ed9a4cedd57bfd976089dd991e2582 # v4.0.0
+      - name: Set up JDK 17
+        uses: actions/setup-java@v1.4.3
+        with:
+          java-version: 17
 
-    - name: Build with Gradle
-      run: ./gradlew build
+      - name: Grant for gradlew
+        run: chmod +x ./gradlew
+        shell: bash
 
-    # The USERNAME and TOKEN need to correspond to the credentials environment variables used in
-    # the publishing section of your build.gradle
-    - name: Publish to GitHub Packages
-      run: ./gradlew publish
-      env:
-        USERNAME: ${{ github.actor }}
-        TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: build gradle
+        run: ./gradlew -x clean build
+        shell: bash
+
+      - name: Get current time
+        uses: 1466587594/get-current-time@v2
+        id: current-time
+        with:
+          format: YYYY-MM-DDTHH-mm-ss
+          utcOffset: "+09:00"
+
+      # 우리 프로젝트를 build한 jar 파일이랑 Procfile이랑 ebextensions 폴더까지 다 묶어서 deploy.zip파일로 만들었음.
+      - name: make deploy package
+        run: |
+          mkdir -p deploy
+          cp build/libs/*.jar deploy/application.jar
+          cp Procfile deploy/Procfile
+          cp -r .ebextensions deploy/.ebextensions
+          cd deploy && zip -r deploy.zip .
+
+      # 앞에서 만든 deploy.zip을 빈스톡한테 던져서 실행하게 해야 함. 이 과정에서 IAM 사용자 정보가 필요함.
+      - name: deploy to beanstalk
+        uses: einaregilsson/beanstalk-deploy@v22
+        with:
+          aws_access_key: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws_secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          application_name: ProgrammersBE
+          environment_name: ProgrammersBE-env
+          version_label: github-action-${{ steps.current-time }}
+          region: ap-northeast-2 # 서울 지역코드
+          deployment_package: deploy/deploy.zip
